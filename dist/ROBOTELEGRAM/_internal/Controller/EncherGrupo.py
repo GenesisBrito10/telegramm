@@ -1,7 +1,7 @@
 import datetime
 from PyQt5.QtWidgets import QDialog, QListWidgetItem, QTableWidgetItem, QPushButton, QMessageBox,QAbstractItemView
 from PyQt5 import QtCore
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon,QColor,QBrush
 from Enums.TipoConta import TipoConta
 from Views.EncherGrupoView import Ui_Dialog as Ui_EncherGrupoDialog
 from Database.Database import Database
@@ -113,6 +113,7 @@ class EncherGrupoController():
         self.thread.sinalAdicionados.connect(self.update_adicionados)
         self.thread.sinalStart.connect(self.start_pause_thread)
         self.thread.sinalStatus.connect(self.update_status)
+        self.thread.sinalFlood.connect(self.set_flood)
         self.thread.sinalAnalisados.connect(self.update_analisados)
         self.thread.sinalContaStatus.connect(self.change_status)
         self.thread.sinalQuit.connect(self.quit_thread)
@@ -120,7 +121,20 @@ class EncherGrupoController():
         self.thread.sinalDeleteTable.connect(lambda: self.database.delete_tarefa(id_tarefa))
         self.thread.start()
         self.ui.btnSalvar.setEnabled(False)
+        self.dialog.close()
 
+
+    def set_flood(self, session):
+        for row in range(self.main_window.tableContas.rowCount()):
+            status_item = self.main_window.tableContas.item(row, 1)
+            print(status_item.text())
+            if status_item.text() == str(session):
+                itemStatus = QTableWidgetItem('Flood')
+                itemStatus.setForeground(QBrush(QColor(255, 125, 0)))
+                self.main_window.tableContas.setItem(row, 2, itemStatus)
+                itemStatus.setTextAlignment(QtCore.Qt.AlignCenter)
+        
+                
     def insert_table_tarefa(self, id_tarefa, origin_group, target_group, analisados, adicionados, num_contas, status):
         
         self.main_window.tableTarefasGrupo.insertRow(0)
@@ -138,7 +152,7 @@ class EncherGrupoController():
         self.button = QPushButton("Iniciar")
         self.button.setEnabled(False)
         self.button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/start.png"))
-        self.button.clicked.connect(lambda: self.toggle_thread(id_tarefa, self.button))
+        self.button.clicked.connect(lambda: self.toggle_thread(id_tarefa))
 
         self.main_window.tableTarefasGrupo.setCellWidget(0, 0, self.button)
         self.main_window.tableTarefasGrupo.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -147,30 +161,53 @@ class EncherGrupoController():
             item.setTextAlignment(QtCore.Qt.AlignCenter)
             self.main_window.tableTarefasGrupo.setItem(0, column, item)
 
-    def toggle_thread(self, id_tarefa, button):
-        thread = self.threads.get(id_tarefa)
-        if thread:
-            if button.text() == "Pausar":
-                button.setText("Iniciar")
-                button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/start.png"))
-                thread.pause()
-            else:
-                button.setText("Pausar")
-                button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/stop.png"))
-                thread.resume()
+    def toggle_thread(self, id_tarefa):
 
-    def start_pause_thread(self):
-        if self.button.text() == "Pausar":
+        for row in range(self.main_window.tableTarefasGrupo.rowCount()):
+            if self.main_window.tableTarefasGrupo.item(row, 1).text() == str(id_tarefa):
+                button = self.main_window.tableTarefasGrupo.cellWidget(row, 0)
+                thread = self.threads.get(id_tarefa)
+                if thread:
+                    if button.text() == "Pausar":
+                        button.setText("Iniciar")
+                        button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/start.png"))
+                        thread.pause()
+                    else:
+                        button.setText("Pausar")
+                        button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/stop.png"))
+                        thread.resume()
+               
+
+
+        
+
+    def start_pause_thread(self,id_tarefa):
+        """ if self.button.text() == "Pausar":
             self.button.setEnabled(False)
             self.button.setText("Iniciar")
             self.button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/start.png"))
         else:
             self.button.setEnabled(True)
             self.button.setText("Pausar")
-            self.button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/stop.png"))
+            self.button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/stop.png")) """
 
-        if self.dialog.isVisible():
-            self.dialog.close()
+        for row in range(self.main_window.tableTarefasGrupo.rowCount()):
+            if self.main_window.tableTarefasGrupo.item(row, 1).text() == str(id_tarefa):
+                button = self.main_window.tableTarefasGrupo.cellWidget(row, 0)
+                thread = self.threads.get(id_tarefa)
+                if thread:
+                    if button.text() == "Pausar":
+                        button.setEnabled(False)
+                        button.setText("Iniciar")
+                        button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/start.png"))
+                        
+                    else:
+                        button.setText("Pausar")
+                        button.setEnabled(True)
+                        button.setIcon(QIcon("D:/Robô Telegram Pro/Views/UI\\../Icons/stop.png"))
+                        
+
+        
 
     def update_adicionados(self, adicionados):
         self.main_window.tableTarefasGrupo.item(0, 5).setText(str(adicionados))
@@ -180,7 +217,7 @@ class EncherGrupoController():
         if status in msgs:
             self.ui.labelStatus.setText(f"<font color='red'>{status}</font>")
         else:
-            self.main_window.tableTarefasGrupo.item(0, 7).setText(status) 
+            #self.main_window.tableTarefasGrupo.item(0, 7).setText(status) 
             self.ui.labelStatus.setText(status)
             self.ui.labelStatus.setStyleSheet('color:green' if status in ["Finalizado","Iniciando a extração dos membros..."] else 'color:red')
 
@@ -200,11 +237,12 @@ class EncherGrupoController():
         status_conta = self.main_view.tableContas.item(row, 2)
         status_conta.setText(status)
 
-    def change_status(self, phone, status):
-        for row in range(self.main_view.tableContas.rowCount()):
-            if self.main_view.tableContas.item(row, 1).text() == phone:
-                return self.get_account_info(row, status)
-        return None
+    def change_status(self, id_tarefa, status):
+        for row in range(self.main_window.tableTarefasGrupo.rowCount()):
+            if self.main_window.tableTarefasGrupo.item(row, 1).text() == str(id_tarefa):
+                self.main_window.tableTarefasGrupo.item(row, 7).setText(status)
+                break
+       
 
     def handle_close_event(self, event):
         print("Closing...")

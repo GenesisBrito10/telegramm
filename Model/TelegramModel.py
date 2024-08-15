@@ -34,8 +34,12 @@ class TelegramModel:
             await self._client.disconnect()
             return f'Conta Adicionada com Sucesso ! {nome}'
         except SessionPasswordNeededError:
+            await self._client.disconnect()
             return 'Senha necessária! Por favor, insira sua senha.'
+        
         except AuthRestartError:
+            await self._client.disconnect()
+
             return "Erro interno do Telegram: reinicie o processo de autorização."
         
     

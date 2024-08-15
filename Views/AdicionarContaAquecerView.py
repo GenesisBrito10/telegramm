@@ -73,6 +73,6 @@ class Ui_Dialog(object):
         _translate = QtCore.QCoreApplication.translate
         Dialog.setWindowTitle(_translate("Dialog", "Adicionar Conta para Aquecer"))
         self.label_7.setText(_translate("Dialog", "Adicionar Conta para Aquecer"))
-        self.label.setText(_translate("Dialog", "Selecione as Contas:"))
+        self.label.setText(_translate("Dialog", "Selecione as Contas - Limite de 10 contas :"))
         self.btnSalvar.setText(_translate("Dialog", "Salvar"))
         self.labelStatus.setText(_translate("Dialog", "Carregando Contas ..."))

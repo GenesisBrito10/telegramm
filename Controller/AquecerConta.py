@@ -80,6 +80,10 @@ class AquecerContaController:
             QMessageBox.warning(None, "Nenhuma conta selecionada", "Por favor, selecione pelo menos uma conta.")
             return
 
+        if len(selected_items) > 10:
+            QMessageBox.warning(None, "Limite de contas", "Você pode aquecer no máximo 10 contas por vez.")
+            return
+        
         for item in selected_items:
             conta_id = item.text()
             file_session, apelido = conta_id.split('|')[0].strip(), conta_id.split('|')[1].strip()
@@ -87,9 +91,9 @@ class AquecerContaController:
                 QMessageBox.warning(None, "Conta duplicada", f"A conta {file_session} já está sendo aquecida.")
                 continue
             
-            """ if not self.is_disponible_account(file_session):
+            if not self.is_disponible_account(file_session):
                 QMessageBox.warning(None, "Conta indisponível", f"A conta {file_session} está em uso.")
-                continue """
+                continue
 
             
             

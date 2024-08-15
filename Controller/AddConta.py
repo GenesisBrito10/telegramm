@@ -15,13 +15,14 @@ class AddContaController:
         self.model = TelegramModel()
         self.database = Database()
         self.main_view = main_view
+        self.main_view.labelVersion.setText('<a href="https://robotelegram.com.br">v4.0.0</a>')
+        self.main_view.labelVersion.setOpenExternalLinks(True)
         self.main_view.btnAddConta.clicked.connect(self.open_add_account_dialog)
         self.main_view.btnDesbloquearFlood.setEnabled(True)
         self.main_view.btnDesbloquearFlood.clicked.connect(self.desbloquear_flood)
         self.load_accounts_thread = ThreadCarregarConta()
         self.load_accounts_thread.account_loaded.connect(self.inserirTableConta)
         self.load_accounts_thread.start()
-
 
 
     def open_add_account_dialog(self):

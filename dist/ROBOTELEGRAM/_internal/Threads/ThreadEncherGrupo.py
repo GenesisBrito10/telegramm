@@ -14,6 +14,7 @@ from Enums.StatusTarefa import StatusTarefa
 from Enums.StatusConta import StatusConta
 from Enums.StatusAddMembro import StatusAddMembro
 from Threads.ThreadCarregarContas import ThreadCarregarConta
+import time
 
 #TODO: Colocar para verificar se o usuário já está no grupo antes de adicionar, grupo ou canal
 #TODO: Colocar pra iterar nos participantes, somente a quantidade do limite diario * quantidade de contas
@@ -24,11 +25,12 @@ class ThreadEncherGrupo(QThread):
     sinalAdicionados = pyqtSignal(int)   
     sinalStatus = pyqtSignal(str)
     sinalAnalisados = pyqtSignal(int)
-    sinalContaStatus = pyqtSignal(str)
+    sinalContaStatus = pyqtSignal(int,str)
     sinalQuit = pyqtSignal(bool)
     sinalInsertTable = pyqtSignal(bool)
     sinalDeleteTable = pyqtSignal(bool)
-    sinalStart = pyqtSignal(bool)
+    sinalStart = pyqtSignal(int)
+    sinalFlood = pyqtSignal(str)
 
     def __init__(self, id_tarefa, accounts, origin_group, target_group, options):
         super().__init__()
@@ -57,17 +59,17 @@ class ThreadEncherGrupo(QThread):
         return link
     
     def pause(self):
-        print("Pausando thread")
+        print(f"Pausando thread {self.id_tarefa}")
         self.paused = True
         self.db.update_campo_tarefa(self.id_tarefa, "status", StatusTarefa.PAUSADO_EXECUTANDO.value)
-        self.sinalStatus.emit(StatusTarefa.PAUSADO_EXECUTANDO.name)
+        self.sinalContaStatus.emit(self.id_tarefa,StatusTarefa.PAUSADO_EXECUTANDO.name)
         
 
     def resume(self):
-        print("Resumindo thread")
+        print(f"Resumindo thread {self.id_tarefa}")
         self.paused = False
         self.db.update_campo_tarefa(self.id_tarefa, "status", StatusTarefa.EXECUTANDO.value)
-        self.sinalStatus.emit(StatusTarefa.EXECUTANDO.name)
+        self.sinalContaStatus.emit(self.id_tarefa,StatusTarefa.EXECUTANDO.name)
        
         with QMutexLocker(self.mutex):
             self.pause_cond.wakeAll()
@@ -106,7 +108,10 @@ class ThreadEncherGrupo(QThread):
     async def verificar_entidades(self):
         for account in self.accounts:
             client = await self.get_client(account.get("file_session"))
+            self.db.update_account_status(account.get("file_session"), StatusConta.TAREFA.value)
+
             if not client:
+                self.db.update_account_status(account.get("file_session"), StatusConta.FALHA.value)
                 return False
             await client.connect()
          
@@ -126,11 +131,13 @@ class ThreadEncherGrupo(QThread):
 
             if not entity_origin or not entity_target:
                 await client.disconnect()
+                self.db.update_account_status(account.get("file_session"), StatusConta.CONECTADA.value)
                 return False
             
             await client.disconnect()
         
         return True
+
 
     async def encher_grupo(self):
         try:
@@ -170,7 +177,7 @@ class ThreadEncherGrupo(QThread):
             if isinstance(entity_target, Channel) and not entity_target.megagroup:
                 is_admin = await self.verify_admin(client, entity_target)
                 if not is_admin:
-                    await client.disconnect() if client else None
+                    await client.disconnect() 
                     self.sinalQuit.emit(False)
                     self.sinalDeleteTable.emit(True)
                     self.loop.close()
@@ -178,7 +185,6 @@ class ThreadEncherGrupo(QThread):
             self.sinalInsertTable.emit(True)
 
             if full_chat_origin and full_chat_target:
-                self.sinalStatus.emit(StatusTarefa.EXECUTANDO.name)
                 self.sinalMsg.emit("Iniciando a extração dos membros...")
                 participants = await self.extract_members(client, entity_origin, full_chat_origin)
                 participants_target = await self.extract_members(client, entity_target, full_chat_target)
@@ -187,13 +193,13 @@ class ThreadEncherGrupo(QThread):
                 selected_participants = await self.filter_participants(client, participants, admins, entity_target,participants_target)
 
                 self.sinalAnalisados.emit(100)
-                await client.disconnect() if client else None
+                await client.disconnect()
                 await self.add_members_to_group(selected_participants, entity_target)
 
         except Exception as e:
             traceback.print_exc()
-            await client.disconnect() if client else None
-            self.sinalMsg.emit(f"Erro ao adicionar membros: {str(e)}")
+            await client.disconnect() 
+            self.sinalContaStatus.emit(self.id_tarefa,f"Erro ao adicionar membros: {str(e)}")
             self.sinalQuit.emit(False)
             self.loop.close()
 
@@ -229,7 +235,7 @@ class ThreadEncherGrupo(QThread):
             #await self.join_group('channel', self.extract_hash(self.target_group))
 
     async def add_members_to_group(self, participants, group_entity):
-        self.sinalStart.emit(True)
+        self.sinalStart.emit(self.id_tarefa)
 
         self.total_added = 0
         total_accounts = len(self.accounts)
@@ -242,13 +248,14 @@ class ThreadEncherGrupo(QThread):
             client = await self.get_client(account.get("file_session"))
             print(f'Conta atual: {account.get("file_session")}')
             if not client:
-                self.sinalStatus.emit(StatusTarefa.FALHA.name)
+                self.sinalContaStatus.emit(self.id_tarefa,StatusTarefa.FALHA.name)
                 self.db.update_campo_tarefa(self.id_tarefa, "status", StatusTarefa.FALHA.value)
                 continue
 
             
 
             for user in participants[self.total_added:]:
+                print(f'index de adicionados: {self.total_added}')
                 with QMutexLocker(self.mutex):
                     while self.paused:
                         await client.disconnect()
@@ -258,93 +265,125 @@ class ThreadEncherGrupo(QThread):
                     client = await self.get_client(account.get("file_session"))
                     print(f'Conta atual: {account.get("file_session")}')
                     if not client:
-                        self.sinalStatus.emit(StatusTarefa.FALHA.name)
+                        self.sinalContaStatus.emit(self.id_tarefa,StatusTarefa.FALHA.name)
                         self.db.update_campo_tarefa(self.id_tarefa, "status", StatusTarefa.FALHA.value)
                         continue
 
                 try:
                     if user and not isinstance(user, InputPeerSelf):
                         input_user = await client.get_input_entity(user)
-                        await self.add_user_to_group(client, input_user, group_entity, current_account_index)
+                        user_input = InputUser(input_user.user_id, input_user.access_hash)
+                        await self.add_user_to_group(client, user_input, group_entity, current_account_index)
                         limite_diario += 1
-                        print(limite_diario)
+                        
                         if limite_diario >= self.options.get("limite_dia", 10):
+                            await client.disconnect()
+
                             print(f"Limite diário da conta atingido: {limite_diario} membros adicionados.")
                             limite_diario = 0
-                            
+
                             break
                 except (FloodWaitError, PeerFloodError) as e:
                     
-                    self.handle_flood_error(e, current_account_index, total_accounts)
+                    #self.handle_flood_error(e, current_account_index, total_accounts)
                     print(f"Erro de Flood: {str(e)} na conta {account.get('file_session')}")
                     error = f"Flood"
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
                     self.db.update_account_status(account.get("file_session"), StatusConta.FLOOD.value)
+                    self.sinalFlood.emit(account.get('file_session'))
                     limite_diario = 0
+                    self.total_added += 1
                     break
                 except UserAlreadyParticipantError:
+                    self.total_added += 1
                     continue
                 except errors.InputUserDeactivatedError:
+                    self.total_added += 1
                     continue
                 except errors.UserPrivacyRestrictedError as e:
                     print(f"Não é possível adicionar {user} devido às configurações de privacidade do usuário")
                     error = f"Não é possível adicionar devido às configurações de privacidade do usuário"
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
+                    self.total_added += 1
+
                     continue
                 except errors.UserNotMutualContactError as e:
                     print(f'{user} provavelmente já estava neste grupo antes, mas saiu')
                     error = f'Usuário provavelmente já estava neste grupo antes, mas saiu'
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
+                    self.total_added += 1
+
                     continue
                 except errors.UserChannelsTooMuchError as e:
                     print(f'{user} já está em muitos canais/grupos.')
                     error = f'Usuário já está em muitos canais/grupos.'
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
+                    self.total_added += 1
+
                     continue
                 except errors.UserKickedError as e:
                     print(f'{user} foi expulso deste grupo/canal')
                     error = f'Usuário foi expulso deste grupo/canal'
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
+                    self.total_added += 1
+
                     continue
                 except errors.UserBannedInChannelError as e:
                     print(f'{user} foi banido de enviar mensagens em grupos/canais')
                     error = f'Usuário foi banido de enviar mensagens em grupos/canais'
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
+                    self.total_added += 1
+
                     continue
                 except errors.UserBlockedError as e:
                     print(f'{user} bloqueou você')
                     error = f'Usuário bloqueou você'
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
+                    self.total_added += 1
+
                     continue
                 except errors.UserIdInvalidError as e:
                     print(f'{user} ID de usuário inválido')
                     error = f'ID de usuário inválido'
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
-                    continue
+                    print('trocando')
+                    self.total_added += 1
+                    break
                     
                 except errors.ChatWriteForbiddenError as e:
-                    self.sinalMsg.emit(f"Você não tem permissão para adicionar membros ao grupo.")
+                    self.sinalContaStatus.emit(self.id_tarefa,f"Você não tem permissão para adicionar membros ao grupo.")
                     error = f"Você não tem permissão para adicionar membros ao grupo."
                     self.db.update_campo_tarefa(self.id_tarefa, "status", StatusTarefa.FALHA.value)
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
                     limite_diario = 0
+                    self.total_added += 1
                     break
                 except Exception as e:
                     traceback.print_exc()
-                    self.sinalMsg.emit(f"Erro ao adicionar membro: {e}")
+                    self.sinalContaStatus.emit(self.id_tarefa,f"Erro ao adicionar membro: {e}")
                     error = f"Erro ao adicionar membro: {e}"
                     self.db.update_campo_tarefa(self.id_tarefa, "status", StatusTarefa.FALHA.value)
                     self.db.insert_membro(self.id_tarefa, user.id, StatusAddMembro.FALHA.value, account.get("apelido"), error, datetime.now().strftime("%d-%m-%Y"))
+                    self.total_added += 1
                     
                     continue
 
-                await asyncio.sleep(self.options.get("intervalo", 0))
+                intervalo = int(self.options.get("intervalo", 0))
+                start_time = time.time()
 
+                while time.time() - start_time < intervalo:
+                    elapsed_time = int(time.time() - start_time)
+                    self.sinalContaStatus.emit(self.id_tarefa,f"{intervalo - elapsed_time} segundos")
+                    time.sleep(1)
+                self.sinalContaStatus.emit(self.id_tarefa,"Adicionando membro...")
+            
+            self.db.update_account_status(account.get("file_session"), StatusConta.CONECTADA.value)
             await client.disconnect()
+            
 
         self.db.update_campo_tarefa(self.id_tarefa, "status", StatusTarefa.FINALIZADA.value)
-        self.sinalStatus.emit(StatusTarefa.FINALIZADA.name)
-        self.sinalStart.emit(True)
+        self.sinalContaStatus.emit(self.id_tarefa,StatusTarefa.FINALIZADA.name)
+        self.sinalStart.emit(self.id_tarefa)
 
       
 
@@ -353,10 +392,10 @@ class ThreadEncherGrupo(QThread):
     async def add_user_to_group(self, client_atual, member, group_entity, current_account_index):
         if isinstance(group_entity, Channel):
             #mm = await client_atual.get_input_entity(member.id)
-            print(f'Adicionando ao canal {member}')
+            #print(f'Adicionando ao canal {member}')
             await client_atual(InviteToChannelRequest(group_entity.id, [member]))
         else:
-            print(f'Adicionando ao grupo {group_entity}')
+            #print(f'Adicionando ao grupo {group_entity}')
             await client_atual(AddChatUserRequest(group_entity.id, member.user_id, fwd_limit=10))
 
         self.total_added += 1
@@ -410,6 +449,8 @@ class ThreadEncherGrupo(QThread):
 
     async def extract_members(self, client, group_entity, full_chat):
         self.db.update_campo_tarefa(self.id_tarefa, "status", StatusTarefa.EXTRAINDO.value)
+        self.sinalContaStatus.emit(self.id_tarefa,StatusTarefa.EXECUTANDO.name)
+
         try:
             if isinstance(group_entity, Chat):
                 return [await client.get_entity(participant.user_id) for participant in full_chat.participants.participants]
